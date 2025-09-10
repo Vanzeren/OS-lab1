@@ -40,6 +40,14 @@ int main(void)
     char *line;
     line = readline("> ");
 
+    if ((line == NULL))
+    {
+      /* code */
+      printf("\n");
+      exit(0);
+    }
+    
+
     // Remove leading and trailing whitespace from the line
     stripwhite(line);
 
@@ -110,7 +118,6 @@ static void print_pgm(Pgm *p)
     printf("]\n");
   }
 }
-
 
 /* Strip whitespace from the start and end of a string.
  *
