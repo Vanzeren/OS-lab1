@@ -164,7 +164,7 @@ void handle_cmd(Command *cmd)
     {
 
       // Child process
-      if (cmd->background == 1)
+      if (cmd->background)
       {
         pid_t sid = setsid();
         if (sid < 0)
@@ -207,7 +207,7 @@ void handle_cmd(Command *cmd)
         }
       }
 
-      if (cmd->background == 1)
+      if (cmd->background)
       {
         signal(SIGHUP, SIG_IGN);
       }
@@ -222,13 +222,18 @@ void handle_cmd(Command *cmd)
     else if (pid > 0)
     {
       // Parent process
-      if (!cmd->background)
+      if (cmd->background)
+      {
+        // Print background process PID
+        printf("[%d]\n", pid);
+        fflush(stdout);
+      }
+      else
       {
         // Wait for foreground process to complete
         int status;
         waitpid(pid, &status, 0);
       }
-      // For background processes, parent continues without waiting
     }
     else
     {
