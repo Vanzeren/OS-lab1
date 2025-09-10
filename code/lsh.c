@@ -23,6 +23,7 @@
 #include <string.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include <signal.h>
 
 // The <unistd.h> header is your gateway to the OS's process management facilities.
 #include <unistd.h>
@@ -34,6 +35,7 @@
 static void print_cmd(Command *cmd);
 static void print_pgm(Pgm *p);
 void handle_cmd(Command *cnd);
+void sigint_handler(int sig);
 
 int main(void)
 {
@@ -41,14 +43,12 @@ int main(void)
   {
     char *line;
     line = readline("> ");
-
-    //handle EOF(ctrl-d)
+    // handle EOF(ctrl-d)
     if (line == NULL)
     {
       printf("EOF\n");
       exit(EXIT_SUCCESS);
     }
-
     // Remove leading and trailing whitespace from the line
     stripwhite(line);
 
@@ -62,6 +62,7 @@ int main(void)
       {
         // Execute the command
         handle_cmd(&cmd);
+        // print_cmd(&cmd);
       }
       else
       {
@@ -158,11 +159,21 @@ void handle_cmd(Command *cmd)
   if (cmd->pgm->next == NULL)
   {
     pid_t pid = fork();
-    
+
     if (pid == 0)
     {
+
       // Child process
-      
+      if (cmd->background == 1)
+      {
+        pid_t sid = setsid();
+        if (sid < 0)
+        {
+          perror("setsid");
+          exit(EXIT_FAILURE);
+        }
+      }
+
       // Handle input redirection
       if (cmd->rstdin != NULL)
       {
@@ -173,7 +184,7 @@ void handle_cmd(Command *cmd)
           exit(EXIT_FAILURE);
         }
       }
-      
+
       // Handle output redirection
       if (cmd->rstdout != NULL)
       {
@@ -184,7 +195,7 @@ void handle_cmd(Command *cmd)
           exit(EXIT_FAILURE);
         }
       }
-      
+
       // Handle error redirection
       if (cmd->rstderr != NULL)
       {
@@ -195,10 +206,15 @@ void handle_cmd(Command *cmd)
           exit(EXIT_FAILURE);
         }
       }
-      
+
+      if (cmd->background == 1)
+      {
+        signal(SIGHUP, SIG_IGN);
+      }
+
       // Execute the command
       execvp(cmd->pgm->pgmlist[0], cmd->pgm->pgmlist);
-      
+
       // If execvp returns, there was an error
       perror("execvp");
       exit(EXIT_FAILURE);
