@@ -26,12 +26,14 @@
 
 // The <unistd.h> header is your gateway to the OS's process management facilities.
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include "parse.h"
 
 static void print_cmd(Command *cmd);
 static void print_pgm(Pgm *p);
-void stripwhite(char *);
+void handle_cmd(Command *cnd);
 
 int main(void)
 {
@@ -40,13 +42,12 @@ int main(void)
     char *line;
     line = readline("> ");
 
-    if ((line == NULL))
+    //handle EOF(ctrl-d)
+    if (line == NULL)
     {
-      /* code */
-      printf("\n");
-      exit(0);
+      printf("EOF\n");
+      exit(EXIT_SUCCESS);
     }
-    
 
     // Remove leading and trailing whitespace from the line
     stripwhite(line);
@@ -59,8 +60,8 @@ int main(void)
       Command cmd;
       if (parse(line, &cmd) == 1)
       {
-        // Just prints cmd
-        print_cmd(&cmd);
+        // Execute the command
+        handle_cmd(&cmd);
       }
       else
       {
@@ -144,4 +145,84 @@ void stripwhite(char *string)
   }
 
   string[++i] = '\0';
+}
+
+void handle_cmd(Command *cmd)
+{
+  if (cmd->pgm == NULL)
+  {
+    return;
+  }
+
+  // For single command (no pipes)
+  if (cmd->pgm->next == NULL)
+  {
+    pid_t pid = fork();
+    
+    if (pid == 0)
+    {
+      // Child process
+      
+      // Handle input redirection
+      if (cmd->rstdin != NULL)
+      {
+        FILE *input_file = freopen(cmd->rstdin, "r", stdin);
+        if (input_file == NULL)
+        {
+          perror("freopen stdin");
+          exit(EXIT_FAILURE);
+        }
+      }
+      
+      // Handle output redirection
+      if (cmd->rstdout != NULL)
+      {
+        FILE *output_file = freopen(cmd->rstdout, "w", stdout);
+        if (output_file == NULL)
+        {
+          perror("freopen stdout");
+          exit(EXIT_FAILURE);
+        }
+      }
+      
+      // Handle error redirection
+      if (cmd->rstderr != NULL)
+      {
+        FILE *error_file = freopen(cmd->rstderr, "w", stderr);
+        if (error_file == NULL)
+        {
+          perror("freopen stderr");
+          exit(EXIT_FAILURE);
+        }
+      }
+      
+      // Execute the command
+      execvp(cmd->pgm->pgmlist[0], cmd->pgm->pgmlist);
+      
+      // If execvp returns, there was an error
+      perror("execvp");
+      exit(EXIT_FAILURE);
+    }
+    else if (pid > 0)
+    {
+      // Parent process
+      if (!cmd->background)
+      {
+        // Wait for foreground process to complete
+        int status;
+        waitpid(pid, &status, 0);
+      }
+      // For background processes, parent continues without waiting
+    }
+    else
+    {
+      // Fork failed
+      perror("fork");
+    }
+  }
+  else
+  {
+    // TODO: Handle piped commands
+    printf("Piped commands not yet implemented\n");
+  }
 }
