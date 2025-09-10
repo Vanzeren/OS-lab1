@@ -39,9 +39,19 @@ void handle_cmd(Command *cnd);
 void sigint_handler(int sig);
 void stripwhite(char *string);
 void execute_pipeline(Command *cmd);
+void sigint_handler(int signum);
+
+
+pid_t foreground_pid = -1;
+int foreground_pgid = -1;
 
 int main(void)
 {
+  if (signal(SIGINT, sigint_handler) == SIG_ERR)
+  {
+    perror("signal(SIGINT) failed");
+  }
+
   for (;;)
   {
     char *line;
@@ -169,15 +179,16 @@ void execute_pipeline(Command *cmd)
 
   while (current != NULL)
   {
-    //builtin cd and exit
+    // builtin cd and exit
     if (strcmp(current->pgmlist[0], "cd") == 0)
     {
-      if(chdir(current->pgmlist[1])!=0){
+      if (chdir(current->pgmlist[1]) != 0)
+      {
         perror("cd failed:");
       }
       return;
     }
-    else if (strcmp(current->pgmlist[0], "exit")==0)
+    else if (strcmp(current->pgmlist[0], "exit") == 0)
     {
       exit(EXIT_SUCCESS);
     }
@@ -327,5 +338,17 @@ void execute_pipeline(Command *cmd)
     }
     printf("\n");
     fflush(stdout);
+  }
+}
+
+void sigint_handler(int signum)
+{
+  if (foreground_pid > 0)
+  {
+    // Send SIGINT to the foreground process group
+    if (killpg(foreground_pgid, SIGINT) < 0)
+    {
+      perror("killpg SIGINT failed");
+    }
   }
 }

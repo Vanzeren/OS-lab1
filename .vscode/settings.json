@@ -4,5 +4,10 @@
         "CMAKE_GENERATOR": "Unix Makefiles",
         "CMAKE_BUILD_TYPE": "Debug" // 或者 "Release", "RelWithDebInfo", "MinSizeRel"
     },
-    "cmake.cmakePath": "/usr/bin/cmake"
+    "cmake.cmakePath": "/usr/bin/cmake",
+    "files.associations": {
+        "csignal": "c",
+        "limits": "c",
+        "shared_mutex": "c"
+    }
 }
