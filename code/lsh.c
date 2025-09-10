@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 #include "parse.h"
 
@@ -36,6 +37,8 @@ static void print_cmd(Command *cmd);
 static void print_pgm(Pgm *p);
 void handle_cmd(Command *cnd);
 void sigint_handler(int sig);
+void stripwhite(char *string);
+void execute_pipeline(Command *cmd);
 
 int main(void)
 {
@@ -61,7 +64,7 @@ int main(void)
       if (parse(line, &cmd) == 1)
       {
         // Execute the command
-        handle_cmd(&cmd);
+        execute_pipeline(&cmd);
         // print_cmd(&cmd);
       }
       else
@@ -148,102 +151,135 @@ void stripwhite(char *string)
   string[++i] = '\0';
 }
 
-void handle_cmd(Command *cmd)
-{
-  if (cmd->pgm == NULL)
-  {
-    return;
-  }
-
-  // For single command (no pipes)
-  if (cmd->pgm->next == NULL)
-  {
-    pid_t pid = fork();
-
-    if (pid == 0)
-    {
-
-      // Child process
-      if (cmd->background)
-      {
-        pid_t sid = setsid();
-        if (sid < 0)
-        {
-          perror("setsid");
-          exit(EXIT_FAILURE);
-        }
-      }
-
-      // Handle input redirection
-      if (cmd->rstdin != NULL)
-      {
-        FILE *input_file = freopen(cmd->rstdin, "r", stdin);
-        if (input_file == NULL)
-        {
-          perror("freopen stdin");
-          exit(EXIT_FAILURE);
-        }
-      }
-
-      // Handle output redirection
-      if (cmd->rstdout != NULL)
-      {
-        FILE *output_file = freopen(cmd->rstdout, "w", stdout);
-        if (output_file == NULL)
-        {
-          perror("freopen stdout");
-          exit(EXIT_FAILURE);
-        }
-      }
-
-      // Handle error redirection
-      if (cmd->rstderr != NULL)
-      {
-        FILE *error_file = freopen(cmd->rstderr, "w", stderr);
-        if (error_file == NULL)
-        {
-          perror("freopen stderr");
-          exit(EXIT_FAILURE);
-        }
-      }
-
-      if (cmd->background)
-      {
-        signal(SIGHUP, SIG_IGN);
-      }
-
-      // Execute the command
-      execvp(cmd->pgm->pgmlist[0], cmd->pgm->pgmlist);
-
-      // If execvp returns, there was an error
-      perror("execvp");
-      exit(EXIT_FAILURE);
+/**
+ * Executes a pipeline of commands.
+ * This is a robust function for handling pipelines.
+ */
+void execute_pipeline(Command *cmd) {
+    if (cmd->pgm == NULL) {
+        return;
     }
-    else if (pid > 0)
-    {
-      // Parent process
-      if (cmd->background)
-      {
-        // Print background process PID
-        printf("[%d]\n", pid);
+
+    //  reverse pgm 
+    Pgm *prev = NULL;
+    Pgm *current = cmd->pgm;
+    Pgm *next = NULL;
+    
+    while (current != NULL) {
+        next = current->next;
+        current->next = prev;
+        prev = current;
+        current = next;
+    }
+    cmd->pgm = prev;
+    
+    Pgm *current_pgm = cmd->pgm;
+
+    int input_fd = STDIN_FILENO;
+    int pid_count = 0;
+    pid_t pids[100];
+
+    while (current_pgm != NULL) {
+        int pipefd[2] = {-1, -1};
+        
+        // Create a new pipe if there are more commands in the chain
+        if (current_pgm->next != NULL) {
+            if (pipe(pipefd) == -1) {
+                perror("pipe");
+                exit(EXIT_FAILURE);
+            }
+        }
+
+        pid_t pid = fork();
+        if (pid == -1) {
+            perror("fork");
+            exit(EXIT_FAILURE);
+        } else if (pid == 0) {
+            // Child process
+            if (cmd->background) {
+                if (setsid() < 0) {
+                    perror("setsid");
+                    exit(EXIT_FAILURE);
+                }
+            }
+
+            // Redirect stdin from previous pipe or file
+            if (input_fd != STDIN_FILENO) {
+                dup2(input_fd, STDIN_FILENO);
+                close(input_fd);
+            } else if (cmd->rstdin != NULL) {
+                int fd = open(cmd->rstdin, O_RDONLY);
+                if (fd == -1) {
+                    perror("open stdin");
+                    exit(EXIT_FAILURE);
+                }
+                dup2(fd, STDIN_FILENO);
+                close(fd);
+            }
+
+            // Redirect stdout to new pipe or file
+            if (current_pgm->next != NULL) {
+                close(pipefd[0]); // Close read end of the new pipe
+                dup2(pipefd[1], STDOUT_FILENO);
+                close(pipefd[1]);
+            } else if (cmd->rstdout != NULL) {
+                int fd = open(cmd->rstdout, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd == -1) {
+                    perror("open stdout");
+                    exit(EXIT_FAILURE);
+                }
+                dup2(fd, STDOUT_FILENO);
+                close(fd);
+            }
+            
+            // Handle stderr redirection
+            if (cmd->rstderr != NULL) {
+                int fd = open(cmd->rstderr, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd == -1) {
+                    perror("open stderr");
+                    exit(EXIT_FAILURE);
+                }
+                dup2(fd, STDERR_FILENO);
+                close(fd);
+            }
+            
+            // Close unused pipe ends in the child
+            // We already redirected the necessary ends, so close all pipe fds
+            if (pipefd[0] != -1) close(pipefd[0]);
+            if (pipefd[1] != -1) close(pipefd[1]);
+            if (input_fd != STDIN_FILENO) {
+                close(input_fd);
+            }
+            
+            execvp(current_pgm->pgmlist[0], current_pgm->pgmlist);
+            perror("execvp");
+            exit(EXIT_FAILURE);
+        } else {
+            // Parent process
+            if (input_fd != STDIN_FILENO) {
+                close(input_fd);
+            }
+            if (current_pgm->next != NULL) {
+                close(pipefd[1]); // Parent doesn't need the write end of the new pipe
+                input_fd = pipefd[0]; // Set the read end for the next iteration
+            }
+            pids[pid_count++] = pid;
+            current_pgm = current_pgm->next;
+        }
+    }
+
+    // Wait for all child processes to complete
+    if (!cmd->background) {
+        for (int i = 0; i < pid_count; ++i) {
+            int status;
+            waitpid(pids[i], &status, 0);
+        }
+    } else {
+        printf("Background process PIDs: ");
+        for (int i = 0; i < pid_count; ++i) {
+            printf("[%d] ", pids[i]);
+        }
+        printf("\n");
         fflush(stdout);
-      }
-      else
-      {
-        // Wait for foreground process to complete
-        int status;
-        waitpid(pid, &status, 0);
-      }
     }
-    else
-    {
-      // Fork failed
-      perror("fork");
-    }
-  }
-  else
-  {
-    // TODO: Handle piped commands
-    printf("Piped commands not yet implemented\n");
-  }
 }
