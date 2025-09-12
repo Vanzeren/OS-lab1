@@ -55,12 +55,14 @@ int main(void)
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
 
+  //lisenting to SIGCHLD
   if (sigaction(SIGCHLD, &sa, NULL) == -1)
   {
     perror("sigaction");
     exit(EXIT_FAILURE);
   }
 
+  //lisenting to SIGINT
   if (signal(SIGINT, sigint_handler) == SIG_ERR)
   {
     perror("signal(SIGINT) failed");
@@ -411,7 +413,7 @@ void sigchld_handler(int sig)
   int status;
   pid_t pid;
 
-  // 非阻塞地等待所有已终止的子进程
+  //waiting children process with WNOHANG
   while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
   {
     if (WIFEXITED(status))
