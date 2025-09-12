@@ -33,6 +33,9 @@
 
 #include "parse.h"
 
+#define _XOPEN_SOURCE 700
+#define _GNU_SOURCE
+
 static void print_cmd(Command *cmd);
 static void print_pgm(Pgm *p);
 void handle_cmd(Command *cnd);
@@ -40,13 +43,24 @@ void sigint_handler(int sig);
 void stripwhite(char *string);
 void execute_pipeline(Command *cmd);
 void sigint_handler(int signum);
-
+void sigchld_handler(int sig);
 
 pid_t foreground_pid = -1;
 int foreground_pgid = -1;
 
 int main(void)
 {
+  struct sigaction sa;
+  sa.sa_handler = sigchld_handler;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+
+  if (sigaction(SIGCHLD, &sa, NULL) == -1)
+  {
+    perror("sigaction");
+    exit(EXIT_FAILURE);
+  }
+
   if (signal(SIGINT, sigint_handler) == SIG_ERR)
   {
     perror("signal(SIGINT) failed");
@@ -388,6 +402,25 @@ void sigint_handler(int signum)
     if (killpg(foreground_pgid, SIGINT) < 0)
     {
       perror("killpg SIGINT failed");
+    }
+  }
+}
+
+void sigchld_handler(int sig)
+{
+  int status;
+  pid_t pid;
+
+  // 非阻塞地等待所有已终止的子进程
+  while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
+  {
+    if (WIFEXITED(status))
+    {
+      printf("Child %d exited with status %d\n", pid, WEXITSTATUS(status));
+    }
+    else if (WIFSIGNALED(status))
+    {
+      printf("Child %d killed by signal %d\n", pid, WTERMSIG(status));
     }
   }
 }
