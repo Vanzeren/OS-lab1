@@ -255,6 +255,19 @@ void execute_pipeline(Command *cmd)
         dup2(fd, STDIN_FILENO);
         close(fd);
       }
+      else if (cmd->background)
+      {
+        // For background processes without explicit stdin redirection,
+        // redirect stdin from /dev/null to prevent reading from terminal
+        int null_fd = open("/dev/null", O_RDONLY);
+        if (null_fd == -1)
+        {
+          perror("open /dev/null");
+          exit(EXIT_FAILURE);
+        }
+        dup2(null_fd, STDIN_FILENO);
+        close(null_fd);
+      }
 
       // Redirect stdout to new pipe or file
       if (current_pgm->next != NULL)
@@ -274,6 +287,19 @@ void execute_pipeline(Command *cmd)
         dup2(fd, STDOUT_FILENO);
         close(fd);
       }
+      else if (cmd->background)
+      {
+        // For background processes without explicit stdout redirection,
+        // redirect stdout to /dev/null to prevent output to terminal
+        int null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd == -1)
+        {
+          perror("open /dev/null for stdout");
+          exit(EXIT_FAILURE);
+        }
+        dup2(null_fd, STDOUT_FILENO);
+        close(null_fd);
+      }
 
       // Handle stderr redirection
       if (cmd->rstderr != NULL)
@@ -286,6 +312,19 @@ void execute_pipeline(Command *cmd)
         }
         dup2(fd, STDERR_FILENO);
         close(fd);
+      }
+      else if (cmd->background)
+      {
+        // For background processes without explicit stderr redirection,
+        // redirect stderr to /dev/null to prevent error output to terminal
+        int null_fd = open("/dev/null", O_WRONLY);
+        if (null_fd == -1)
+        {
+          perror("open /dev/null for stderr");
+          exit(EXIT_FAILURE);
+        }
+        dup2(null_fd, STDERR_FILENO);
+        close(null_fd);
       }
 
       // Close unused pipe ends in the child
